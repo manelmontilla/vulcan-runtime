@@ -1,3 +1,5 @@
+// Package checktype provided the means for getting information about a
+// Checktype.
 package checktype
 
 import (
