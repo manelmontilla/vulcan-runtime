@@ -30,9 +30,9 @@ func (e ErrNoChecktypeImage) Error() string {
 	return fmt.Sprintf("invalid metadata in image %s", e.Image)
 }
 
-// Image represents the metadata about a checktype stored in a docker image.
+// image represents the metadata about a checktype stored in a docker image.
 // Vulcan checktype.
-type Image struct {
+type image struct {
 	// Name the name of the image in format REPOSITORY:TAG.
 	Name string
 
@@ -45,35 +45,35 @@ type Image struct {
 
 // imageFromRef returns the information of a checktype stored in the image
 // pointed by a ref.
-func imageFromRef(ref string) (Image, error) {
+func imageFromRef(ref string) (image, error) {
 	cli, err := dockerutil.NewAPIClient()
 	if err != nil {
-		return Image{}, fmt.Errorf("unable to instantiate a docker client: %v", err)
+		return image{}, fmt.Errorf("unable to instantiate a docker client: %v", err)
 	}
 	labels, err := dockerutil.ImageLabels(cli, ref)
 	if err != nil {
-		return Image{}, fmt.Errorf("unable to read image labels: %w", err)
+		return image{}, fmt.Errorf("unable to read image labels: %w", err)
 	}
 
 	ctName, ok := labels[checktypeNameLabel]
 	if !ok {
 		err := ErrNoChecktypeImage{Image: ref}
-		return Image{}, fmt.Errorf("label %s not found: %w", checktypeNameLabel, err)
+		return image{}, fmt.Errorf("label %s not found: %w", checktypeNameLabel, err)
 	}
 
 	m, ok := labels[checktypeManifest]
 	if !ok {
 		err := ErrNoChecktypeImage{Image: ref}
-		return Image{}, fmt.Errorf("label %s not found: %w", checktypeManifest, err)
+		return image{}, fmt.Errorf("label %s not found: %w", checktypeManifest, err)
 	}
 
-	manifest, err := ParseManifest(m)
+	manifest, err := parseManifest(m)
 	if err != nil {
 		err := ErrNoChecktypeImage{Image: ref}
-		return Image{}, fmt.Errorf("invalid checktype manifest: %w", err)
+		return image{}, fmt.Errorf("invalid checktype manifest: %w", err)
 	}
 
-	return Image{
+	return image{
 		Name:          ref,
 		ChecktypeName: ctName,
 		Manifest:      manifest,
@@ -81,7 +81,7 @@ func imageFromRef(ref string) (Image, error) {
 }
 
 // Checktype returns the information of the checktype defined in the image.
-func (i Image) Checktype() (catalog.Checktype, error) {
+func (i image) Checktype() (catalog.Checktype, error) {
 	options, err := i.Manifest.UnmarshalOptions()
 	if err != nil {
 		return catalog.Checktype{}, fmt.Errorf("unable to unmarshal options: %w", err)

@@ -112,8 +112,8 @@ func (m Manifest) UnmarshalOptions() (map[string]interface{}, error) {
 	return options, nil
 }
 
-// ParseManifest parses the contents of a manifest file.
-func ParseManifest(content string) (Manifest, error) {
+// parseManifest parses the contents of a manifest file.
+func parseManifest(content string) (Manifest, error) {
 	d := Manifest{}
 	m, err := toml.Decode(content, &d)
 	if err != nil {
