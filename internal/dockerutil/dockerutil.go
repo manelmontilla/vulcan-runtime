@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/distribution/reference"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/flags"
@@ -70,4 +72,27 @@ func ImageLabels(cli client.APIClient, image string) (map[string]string, error) 
 		}
 	}
 	return labels, nil
+}
+
+// ParseImageRef validates and enrich an image reference with domain (docker.io if
+// domain missing), tag (latest if missing).
+func ParseImageRef(ref string) (domain, path, tag string, err error) {
+	named, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return
+	}
+	// add latests if tag is missing
+	named = reference.TagNameOnly(named)
+	domain = reference.Domain(named)
+	path = reference.Path(named)
+	tagged, isTagged := named.(reference.Tagged)
+	if domain == "docker.io" {
+		// Ignore docker.io and "library/" as we don't expect a check in
+		// docker.io/library.
+		path = strings.TrimPrefix(path, "library/")
+	}
+	if isTagged {
+		tag = tagged.Tag()
+	}
+	return
 }

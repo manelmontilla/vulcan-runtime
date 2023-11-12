@@ -3,6 +3,8 @@ package checktype
 import (
 	"fmt"
 
+	catalog "github.com/adevinta/vulcan-check-catalog/pkg/model"
+
 	"github.com/manelmontilla/vulcan-runtime/internal/dockerutil"
 )
 
@@ -41,9 +43,9 @@ type Image struct {
 	Manifest Manifest
 }
 
-// ImageFromRef returns the information of a checktype stored in the image
+// imageFromRef returns the information of a checktype stored in the image
 // pointed by a ref.
-func ImageFromRef(ref string) (Image, error) {
+func imageFromRef(ref string) (Image, error) {
 	cli, err := dockerutil.NewAPIClient()
 	if err != nil {
 		return Image{}, fmt.Errorf("unable to instantiate a docker client: %v", err)
@@ -79,20 +81,20 @@ func ImageFromRef(ref string) (Image, error) {
 }
 
 // Checktype returns the information of the checktype defined in the image.
-func (i Image) Checktype() (Checktype, error) {
+func (i Image) Checktype() (catalog.Checktype, error) {
 	options, err := i.Manifest.UnmarshalOptions()
 	if err != nil {
-		return Checktype{}, fmt.Errorf("unable to unmarshal options: %w", err)
+		return catalog.Checktype{}, fmt.Errorf("unable to unmarshal options: %w", err)
 	}
 	assetTypes, err := i.Manifest.AssetTypes.Strings()
 	if err != nil {
-		return Checktype{}, fmt.Errorf("unable to read asset types: %w", err)
+		return catalog.Checktype{}, fmt.Errorf("unable to read asset types: %w", err)
 	}
 	var requiredVars []any
 	for _, r := range i.Manifest.RequiredVars {
 		requiredVars = append(requiredVars, r)
 	}
-	ct := Checktype{
+	ct := catalog.Checktype{
 		Name:         i.ChecktypeName,
 		Description:  i.Manifest.Description,
 		Image:        i.Name,
