@@ -1,0 +1,26 @@
+linters:
+  enable:
+    - gci
+    - godot
+    - gofmt
+    - goheader
+    - misspell
+    - revive
+    - whitespace
+linters-settings:
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/manelmontilla/vulcan-runtime)
+    custom-order: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false
+  exclude-rules:
+    - linters:
+        - revive
+      text: 'unused-parameter: parameter ''.*'' seems to be unused'
+run:
+  timeout: 5m
