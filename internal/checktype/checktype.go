@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	catalog "github.com/adevinta/vulcan-check-catalog/pkg/model"
+
 	"github.com/manelmontilla/vulcan-runtime/internal/dockerutil"
 )
 
