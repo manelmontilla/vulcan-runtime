@@ -3,11 +3,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/manelmontilla/vulcan-runtime/runtime"
 )
@@ -27,21 +30,60 @@ type State struct {
 type Push struct {
 	checks sync.Map
 	log    *slog.Logger
-	srv    http.Server
 }
 
+// NewPush creates a new HTTP server that listens for check progress
+// notifications.
 func NewPush(addr string) *Push {
 	log := slog.Default()
 	p := &Push{
 		log: log,
 	}
-	m := http.NewServeMux()
-	srv := http.Server{
+	return p
+}
+
+// Start makes the Push API start listening for notifications. It will try to
+// gracefully stop listening when the passed context is cancelled. The returnned
+// channel will contain the result of the stop operation.
+func (p *Push) Start(ctx context.Context, addr string) <-chan error {
+	srv := &http.Server{
 		Addr:    addr,
 		Handler: http.HandlerFunc(p.handleHTTP),
 	}
+	stopped := make(chan error, 1)
+	go func() {
+		err := srv.ListenAndServe()
+		stopped <- err
+	}()
 
-	return p
+	done := make(chan error)
+	ctxDone := ctx.Done()
+	go func() {
+		var err error
+	Loop:
+		for {
+			select {
+			case <-ctxDone:
+				ctxTimeout, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				err = srv.Shutdown(ctxTimeout)
+				// After the ctxDone channel was fired we don't need to consider
+				// it anymore in the select.
+				ctxDone = nil
+			case stoppedErr := <-stopped:
+				// This select branch waits for the HTTP server to be stopped.
+				if errors.Is(stoppedErr, http.ErrServerClosed) {
+					break Loop
+				}
+				if stoppedErr != nil {
+					err = stoppedErr
+				}
+				break Loop
+			}
+		}
+		done <- err
+	}()
+	return stopped
 }
 
 func (p *Push) handleHTTP(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +98,7 @@ func (p *Push) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// URL cannot be nil.
 	rp := r.URL.Path
 	dir, id := path.Split(rp)
-	if rp != "/checks/" {
+	if dir != "/checks/" {
 		p.log.Error("unable to process check push notification, invalid path", "path", rp)
 		writeHTTPError(http.StatusBadRequest, "invalid path", w)
 		return
@@ -85,10 +127,6 @@ func (p *Push) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cprogress <- s
 	w.WriteHeader(http.StatusOK)
-}
-
-func (c *Push) start() {
-
 }
 
 func writeHTTPError(status int, msg string, w http.ResponseWriter) {
