@@ -1,8 +1,12 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"slices"
+	"time"
+
+	"github.com/manelmontilla/vulcan-sdk/check/report"
 )
 
 const (
@@ -33,7 +37,17 @@ func NewState(s string) (State, error) {
 	return "", fmt.Errorf("invalid state %s", s)
 }
 
-// Check defines represents a check that can be run by the [Runtime].
+// UnmarshalJSON unmarshals a [State] from its JSON representation.
+func (s *State) UnmarshalJSON(data []byte) error {
+	v, err := NewState(string(data))
+	if err != nil {
+		return err
+	}
+	*s = v
+	return nil
+}
+
+// Check defines a check that can be run by the [Runtime].
 type Check struct {
 	Image    string
 	Target   string
@@ -141,4 +155,20 @@ func (c States) IsTerminal(s State) bool {
 	t := c.Terminal()
 	_, found := slices.BinarySearch(t, s)
 	return found
+}
+
+// runningCheck contains the information about a check being run by a [Runtime].
+type runningCheck struct {
+	ID         string
+	Check      Check
+	Cancel     context.CancelFunc
+	Started    time.Time
+	FinalState *State
+	Report     *report.Report
+	progress   chan RunState
+}
+
+// running stores the information related to the checks run by a [Runtime].
+type running struct {
+	checks map[string]Check
 }

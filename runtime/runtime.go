@@ -5,16 +5,28 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"time"
 
 	report "github.com/adevinta/vulcan-report"
+
+	"github.com/manelmontilla/vulcan-runtime/runtime/backend"
+)
+
+var (
+	DefaultTimeout time.Duration = 30 * time.Minute
+	DefaultAPIHost               = "127.0.0.1"
 )
 
 // RunState is written to the [Progress.Progress] channel to update the progress
 // of the execution of a [Check].
 type RunState struct {
-	Running  time.Duration
-	State    State
+	// Running the time the check has been running.
+	Running time.Duration
+	// State of the check.
+	State State
+	// Progress of the check.
 	Progress float32
 }
 
@@ -30,21 +42,26 @@ type Result struct {
 	// Logs contain the logs gathered from running the container of a [Check],
 	// it can be nil if the runtime was unable to start running the [Check].
 	Logs []byte
+
+	err error
 }
 
 // Progress is returned by the [Runtime.Run] method to track the execution of a
 // Check.
-type Progress struct{}
-
-// States returns a channel to be read to gather the intermediate states that a
-// [Check] goes through while running. When [States] is closed, the Check has
-// finished running, and any call to the method [Result] is warranteed to not
-// block and return the final result of the execution.
-func (p Progress) States() chan<- RunState {
-	panic("not implemented")
+type Progress struct {
+	progress chan RunState
+	result   chan Result
 }
 
-// Result returns the result of the execution of a [Check] launch by the
+// States returns a channel that can be read to gather the intermediate states
+// that a [Check] goes through while running. When [States] is closed, the Check
+// has finished running, and any call to the method [Result] is warranteed to
+// not block and return the final result of the execution.
+func (p Progress) States() chan<- RunState {
+	return p.progress
+}
+
+// Result returns the result of the execution of a [Check] launched by the
 // [Runtime.Run] method. If the channel returned by [Progress.States] is not
 // closed it will block until it is. Even if it returns an error, the field
 // [Result.Logs] can contain some logs.
@@ -54,6 +71,9 @@ func (p Progress) Result() (Result, error) {
 
 // Runtime allows to run Checks.
 type Runtime struct {
+	wg      sync.WaitGroup
+	backend backend.Backend
+	logger  *slog.Logger
 }
 
 // Default returns the default Runtime.
@@ -61,9 +81,147 @@ func Default() *Runtime {
 	panic("not implemented")
 }
 
-// Run runs a [Check], the execution of the check can be aborted through the
+// Run runs a [Check]. The execution of the check can be aborted through the
 // given context. See [Progress] for information about how to track the
 // execution.
-func (r *Runtime) Run(ctx context.Context, c Check) (Progress, error) {
-	return Progress{}, errors.New("not implemented")
+func (r *Runtime) Run(ctx context.Context, check Check) Progress {
+	// A channel of length 10 looks enough to let the client of the Runtime cope
+	// wit the back pressure. If it can't handle the back pressure we will skip
+	// some intermediate messages.
+	progress := make(chan RunState, 10)
+	result := make(chan Result, 1)
+	p := Progress{
+		progress: progress,
+		result:   result,
+	}
+	r.wg.Add(1)
+	go r.run(ctx, check, p)
+	return p
 }
+
+func (r *Runtime) run(ctx context.Context, check Check, progress Progress) {
+
+}
+
+// func (r *Runtime) run(ctx context.Context, check Check, progress chan RunState, result chan Result) (Progress, error) {
+// 	var err error
+// 	timeout := DefaultTimeout
+// 	if check.Timeout == nil || *check.Timeout != 0 {
+// 		timeout = time.Duration(*check.Timeout * int(time.Second))
+// 	}
+// 	// Create the context under which the backend will execute the check. The
+// 	// context will be cancelled either because the function ctx is cancelled or
+// 	// because the timeout for the check has elapsed.
+// 	ctx, cancel := context.WithTimeout(ctx, timeout)
+// 	defer cancel()
+
+// 	ct, err := checktype.FromImageRef(check.Image)
+// 	if err != nil {
+// 		cr.cAborter.Remove(check.CheckID)
+// 		return fmt.Errorf("unable to read checktype info: %w", err)
+// 	}
+// 	runParams := backend.RunParams{
+// 		CheckID:          check.CheckID,
+// 		Target:           check.Target,
+// 		Image:            check.Image,
+// 		AssetType:        check.AssetType,
+// 		Options:          check.Options,
+// 		RequiredVars:     check.RequiredVars,
+// 		CheckTypeName:    ctName,
+// 		ChecktypeVersion: ctVersion,
+// 	}
+// 	cr.Logger.Infof(check.logTrace("running check", "running"))
+// 	finished, err := cr.Backend.Run(ctx, runParams)
+// 	if err != nil {
+// 		cr.cAborter.Remove(check.CheckID)
+// 		return fmt.Errorf("unable to run check: %w", err)
+// 	}
+// 	var logsLink string
+// 	// The finished channel is written by the backend when a check has finished.
+// 	// The value written to the channel contains the logs of the check(stdin and
+// 	// stdout) plus a field Error indicanting if there were any unexpected error
+// 	// during the execution. If that error is not nil, the backend was unable to
+// 	// retrieve the output of the check so the Output field will be nil.
+// 	res := <-finished
+// 	// When the check is finished it can not be aborted anymore
+// 	// so we remove it from aborter.
+// 	cr.cAborter.Remove(check.CheckID)
+// 	// Try always to upload the logs of the check if present.
+// 	if res.Output != nil {
+// 		logsLink, err = cr.CheckUpdater.UploadCheckData(check.CheckID, "logs", check.StartTime, res.Output)
+// 		if err != nil {
+// 			err = fmt.Errorf("unable to store the logs of the check %s: %w", check.CheckID, err)
+// 			// We return to retry the log upload later.
+// 			return err
+// 		}
+
+// 		// Set the link for the logs of the check.
+// 		err = cr.CheckUpdater.UpdateState(stateupdater.CheckState{
+// 			ID:  check.CheckID,
+// 			Raw: &logsLink,
+// 		})
+// 		if err != nil {
+// 			err = fmt.Errorf("unable to update the link to the logs of the check %s: %w", check.CheckID, err)
+// 			return err
+// 		}
+// 		cr.Logger.Debugf(check.logTrace(logsLink, "raw_logs"))
+// 	}
+
+// 	// We query if the check has sent any status update with a terminal status.
+// 	isTerminal := cr.CheckUpdater.CheckStatusTerminal(check.CheckID)
+
+// 	// Check if the backend returned any not expected error while running the check.
+// 	execErr := res.Error
+// 	if execErr != nil &&
+// 		!errors.Is(execErr, context.DeadlineExceeded) &&
+// 		!errors.Is(execErr, context.Canceled) &&
+// 		!errors.Is(execErr, backend.ErrNonZeroExitCode) {
+// 		return execErr
+// 	}
+
+// 	// The times this component has to set the state of a check are
+// 	// when the check is canceled, timeout or finished with an exit status code
+// 	// different from 0. That's because, in those cases, it's possible for the
+// 	// check to not have had time to set the state by itself.
+// 	var status string
+// 	if errors.Is(execErr, context.DeadlineExceeded) {
+// 		status = stateupdater.StatusTimeout
+// 	}
+// 	if errors.Is(execErr, context.Canceled) {
+// 		status = stateupdater.StatusAborted
+// 	}
+// 	if errors.Is(execErr, backend.ErrNonZeroExitCode) {
+// 		status = stateupdater.StatusFailed
+// 	}
+// 	// Ensure the check sent a status update with a terminal status.
+// 	if status == "" && !isTerminal {
+// 		status = stateupdater.StatusFailed
+// 	}
+// 	// If the check was not canceled or aborted we just finish its execution.
+// 	if status == "" {
+// 		// We signal the CheckUpdater that we don't need it to store that
+// 		// information any more.
+// 		err = cr.CheckUpdater.FlushCheckStatus(check.CheckID)
+// 		if err != nil {
+// 			err = fmt.Errorf("error deleting the terminal status of the check%s: %w", check.CheckID, err)
+// 			return err
+// 		}
+// 		return err
+// 	}
+// 	err = cr.CheckUpdater.UpdateState(stateupdater.CheckState{
+// 		ID:     check.CheckID,
+// 		Status: &status,
+// 	})
+// 	if err != nil {
+// 		err = fmt.Errorf("error updating the status of the check %s: %w", check.CheckID, err)
+// 		return err
+// 	}
+// 	// We signal the CheckUpdater that we don't need it to store that
+// 	// information any more.
+// 	err = cr.CheckUpdater.FlushCheckStatus(check.CheckID)
+// 	if err != nil {
+// 		err = fmt.Errorf("error deleting the terminal status of the check %s: %w", check.CheckID, err)
+// 		return err
+// 	}
+// 	return err
+// }
